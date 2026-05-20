@@ -44,6 +44,5 @@ class BanditTests(unittest.TestCase):
         self.assertGreaterEqual(len(bandit.active_arm_ids), 1)
         self.assertLessEqual(len(bandit.active_arm_ids), len(self.arms))
 
-
 if __name__ == "__main__":
     unittest.main()

@@ -10,7 +10,7 @@ The current version implements:
 
 - a deterministic fishery simulator based on a system dynamics model
 - a fixed set of policy arms inspired by the original AnyLogic-style setup
-- episode-level multi-armed bandit experiments
+- rolling control-window bandit experiments
 - CSV logging and SVG plotting
 - tests for lookup tables, dynamics, and bandit behavior
 
@@ -66,7 +66,7 @@ The policy-maker in this project is not controlling fish directly. Instead, it c
 - reserved area / marine protection
 - ship caps
 
-The learning layer treats each policy bundle as an action. A bandit algorithm chooses one policy arm for a full episode, observes the resulting reward, and gradually learns which arms tend to perform well.
+The learning layer treats each policy bundle as an action. A bandit algorithm chooses one policy arm for a 10-step control window, observes the cumulative reward from that window, and then can keep or change policy for the next window.
 
 ## Why This Project Exists
 
@@ -86,7 +86,8 @@ That is exactly why this repo starts with bandits for intuition, but is intentio
 The current implementation uses:
 
 - monthly timesteps
-- 120-month episodes
+- 120-step episodes
+- 10-step policy decision windows inside each episode
 - deterministic dynamics
 - piecewise-linear lookup tables for mortality and catch efficiency
 - 7 fixed policy arms
@@ -95,10 +96,9 @@ The current implementation uses:
 From the current baseline outputs in [`outputs/baseline_cli`](./outputs/baseline_cli), the qualitative story is already visible:
 
 - `baseline_laissez_faire` collapses, with collapse detected around month 25.
-- `moderate_taxation` and `high_taxation` avoid collapse over the 120-month horizon.
-- `moderate_marine_reserve` and `strong_marine_reserve` also avoid collapse.
-- `strong_marine_reserve` achieves the highest cumulative reward in the current reward design.
-- `high_taxation` produces the highest cumulative raw profit, but not the highest reward.
+- in the fixed-policy baseline, `baseline_laissez_faire` still collapses around month 25 over the full 120-step horizon.
+- in the rolling bandit workflow, each algorithm can reselect a policy every 10 steps using the cumulative reward from the last window.
+- the bandits are not forced to diversify across algorithms; they may independently choose the same arm if their internal estimates point there.
 
 One important caveat is also visible:
 
@@ -116,8 +116,8 @@ If you optimize for raw profit alone, the system may reward policies that are ec
 
 In the current setup:
 
-- `high_taxation` has the highest raw profit
-- `strong_marine_reserve` has the highest cumulative reward
+- short 10-step windows can temporarily favor more exploitative policies
+- full 120-step rollouts still reveal the long-run collapse risk of laissez-faire behavior
 
 That is a very practical lesson: the choice of objective function is a policy decision, not just a technical detail.
 
@@ -131,9 +131,9 @@ The bandit framing is still useful because it lets us compare policy bundles qui
 
 So the bandit layer is best understood as a simplified experimentation lens, not the final theory of control for this problem.
 
-### 3. Conservation can outperform naive exploitation on the chosen reward
+### 3. Evaluation horizon changes the policy ranking
 
-The current outputs suggest that stronger ecological protection can dominate laissez-faire behavior once long-term system health is valued.
+The project now exposes both views at once: short 10-step control windows for learning updates, and long 120-step episodes for ecological consequences. That makes it easier to see how a policy can look attractive locally while still degrading the long-run system.
 
 ### 4. Some policy ideas need calibration, not just code
 
@@ -206,7 +206,7 @@ And strongly penalized for collapse:
 
 - collapse threshold: `fish_population < 0.1 * carrying_capacity`
 
-Episode reward is the sum of per-step rewards across 120 months.
+Bandit updates use the cumulative reward over each 10-step decision window. Full episodes still run for 120 steps.
 
 ## Repository Structure
 
@@ -328,7 +328,7 @@ For a baseline run:
 
 1. Load config and the 7 V1 policy arms.
 2. Reset to the same initial state for each arm.
-3. Roll out 120 monthly steps.
+3. Roll out 10 monthly steps.
 4. Save trajectory and summary CSVs.
 5. Render comparison plots.
 
@@ -336,10 +336,11 @@ For a bandit run:
 
 1. Build a bandit with the 7 policy arms.
 2. Reset the simulator for each episode.
-3. Let the bandit choose one arm for the full episode.
-4. Roll out 120 monthly steps.
-5. Update the bandit with episode reward.
-6. Aggregate results over many episodes and seeds.
+3. Let each bandit choose one arm for the next 10-step control window.
+4. Roll out those 10 monthly steps from the current simulator state.
+5. Update the bandit with the cumulative reward from that 10-step window.
+6. Repeat until the full 120-step episode is complete.
+7. Aggregate results over many episodes and seeds.
 
 ## How to Run the Project
 
@@ -385,6 +386,7 @@ python3 simulator.py compare-bandits --episodes 10 --seeds 3 --output-dir output
 This writes:
 
 - `bandit_episode_summaries.csv`
+- `bandit_window_summaries.csv`
 - `reward_by_episode.svg`
 - one action-frequency chart per algorithm
 - one average-reward-by-arm chart per algorithm
@@ -413,7 +415,7 @@ It tells you, per policy arm:
 
 The main file is:
 
-- [`outputs/bandits_cli_v2/bandit_episode_summaries.csv`](./outputs/bandits_cli_v2/bandit_episode_summaries.csv)
+- [`outputs/bandits_windowed_smoke/bandit_episode_summaries.csv`](./outputs/bandits_windowed_smoke/bandit_episode_summaries.csv)
 
 It lets you inspect:
 
@@ -425,20 +427,18 @@ It lets you inspect:
 
 Using the checked-in outputs from the current repo state:
 
-- Baseline collapses with negative cumulative reward.
-- Both reserve arms and both taxation arms avoid collapse over 120 months.
-- `strong_marine_reserve` currently has the best cumulative reward: about `48.94`.
-- `high_taxation` currently has the best cumulative raw profit: about `7215.47`.
-- In the sample bandit runs in [`outputs/bandits_cli_v2`](./outputs/bandits_cli_v2), the better-performing algorithms tend to concentrate on `strong_marine_reserve`.
+- Fixed-policy 120-step baselines still show collapse for `baseline_laissez_faire`, `hard_capacity_control`, and `weak_capacity_control`.
+- The rolling bandit workflow now logs both per-window rewards and whole-episode outcomes.
+- Different algorithms can converge toward the same arm, or switch arms at different windows, depending on their own estimates.
 
 The sample bandit averages from that output set are roughly:
 
 | Algorithm | Mean episode reward in sample run |
 | --- | --- |
-| `softmax` | `-248.653` |
-| `ucb1` | `-248.653` |
-| `epsilon_greedy` | `-249.163` |
-| `pac_successive_elimination` | `-349.074` |
+| `pac_successive_elimination` | `-171.055` |
+| `epsilon_greedy` | `-485.329` |
+| `softmax` | `-485.072` |
+| `ucb1` | `-805.593` |
 
 These values are from a small checked-in sample run, so they should be interpreted as workflow confirmation, not final scientific results.
 
@@ -455,9 +455,9 @@ This version makes a few deliberate choices:
 
 There are also two especially important modeling notes:
 
-### 1. This is episode-level control, not step-level control
+### 1. This is windowed control, not fully state-aware RL
 
-Bandits choose one policy for the whole episode. That is a good simplification for V1, but it is not the same as adaptive governance.
+Bandits now choose a policy every 10 steps, which is more adaptive than one-arm-per-episode. But they still do not condition on the full simulator state the way an RL policy would.
 
 ### 2. Capacity caps are currently structurally present but behaviorally inactive
 
@@ -477,7 +477,7 @@ Some natural next steps are:
 
 ### Learning extensions
 
-- move from episode-level bandits to control-window bandits
+- move from fixed-size control windows to a full state-based RL controller
 - build a Gymnasium-style RL wrapper
 - allow state-dependent policies
 - compare myopic rewards versus discounted long-horizon returns
