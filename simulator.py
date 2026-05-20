@@ -25,6 +25,12 @@ def main() -> None:
     compare_parser.add_argument("--episodes", type=int, default=200, help="Episodes per seed")
     compare_parser.add_argument("--seeds", type=int, default=20, help="Number of seeds")
     compare_parser.add_argument(
+        "--decision-interval",
+        type=int,
+        default=10,
+        help="Number of simulator steps between bandit decisions",
+    )
+    compare_parser.add_argument(
         "--output-dir",
         default="outputs/bandits",
         help="Directory for bandit CSV and SVG outputs",
@@ -35,7 +41,12 @@ def main() -> None:
         run_baseline(Path(args.output_dir))
         return
     if args.command == "compare-bandits":
-        run_comparison(Path(args.output_dir), episodes=args.episodes, seeds=args.seeds)
+        run_comparison(
+            Path(args.output_dir),
+            episodes=args.episodes,
+            seeds=args.seeds,
+            decision_interval=args.decision_interval,
+        )
         return
 
 

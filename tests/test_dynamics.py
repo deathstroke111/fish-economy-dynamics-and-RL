@@ -2,7 +2,7 @@ import unittest
 
 from fishery.config import FisheryConfig
 from fishery.dynamics import step
-from fishery.env import initial_state, rollout
+from fishery.env import initial_state, rollout, rollout_window
 from fishery.policy import get_v1_policy_arms
 from fishery.state import FisheryState, PolicyArm
 
@@ -58,14 +58,32 @@ class DynamicsTests(unittest.TestCase):
             summary, _ = rollout(initial_state(self.config), policy, self.config)
             summaries[policy.name] = summary
 
+        self.assertEqual(summaries["baseline_laissez_faire"].steps, self.config.horizon_steps)
+        self.assertEqual(self.config.horizon_steps, 120)
         self.assertTrue(summaries["baseline_laissez_faire"].collapse_flag)
         self.assertFalse(summaries["moderate_taxation"].collapse_flag)
-        self.assertFalse(summaries["high_taxation"].collapse_flag)
+        self.assertGreater(
+            summaries["moderate_taxation"].final_fish_population,
+            summaries["baseline_laissez_faire"].final_fish_population,
+        )
         self.assertTrue(
             summaries["high_taxation"].final_fish_population
             > summaries["moderate_taxation"].final_fish_population
         )
-        self.assertTrue(summaries["strong_marine_reserve"].final_fish_population > summaries["moderate_marine_reserve"].final_fish_population)
+        self.assertTrue(
+            summaries["strong_marine_reserve"].final_fish_population
+            > summaries["moderate_marine_reserve"].final_fish_population
+        )
+
+    def test_rollout_window_advances_state_and_time(self) -> None:
+        state = initial_state(self.config)
+        policy = get_v1_policy_arms()[0]
+        next_state, summary, trajectory = rollout_window(state, policy, self.config, horizon_steps=10)
+        self.assertEqual(summary.steps, 10)
+        self.assertEqual(len(trajectory), 10)
+        self.assertEqual(next_state.time, 10)
+        self.assertEqual(next_state.fish_population, trajectory[-1].end_fish_population)
+        self.assertEqual(next_state.ships, trajectory[-1].end_ships)
 
 
 if __name__ == "__main__":

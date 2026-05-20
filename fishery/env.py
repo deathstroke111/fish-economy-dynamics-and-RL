@@ -55,3 +55,24 @@ def rollout(
 
     summary = summarize_trajectory(trajectory, policy, config)
     return summary, trajectory
+
+
+def rollout_window(
+    initial: FisheryState,
+    policy: PolicyArm,
+    config: FisheryConfig,
+    horizon_steps: int,
+) -> Tuple[FisheryState, EpisodeSummary, List[TrajectoryPoint]]:
+    """Run a shorter control window and return the ending state."""
+
+    summary, trajectory = rollout(initial, policy, config, horizon_steps=horizon_steps)
+    if not trajectory:
+        return initial, summary, trajectory
+
+    final_point = trajectory[-1]
+    next_state = FisheryState(
+        time=initial.time + len(trajectory),
+        fish_population=final_point.end_fish_population,
+        ships=final_point.end_ships,
+    )
+    return next_state, summary, trajectory
