@@ -2,9 +2,10 @@
 
 import argparse
 from collections import defaultdict
+from dataclasses import replace
 from pathlib import Path
 from statistics import mean
-from typing import DefaultDict, Dict, List, Tuple, Type
+from typing import DefaultDict, Dict, List, Optional, Tuple, Type
 
 from bandits import (
     EpsilonGreedyBandit,
@@ -32,8 +33,16 @@ def _build_bandits() -> List[BanditSpec]:
     ]
 
 
-def run_comparison(output_dir: Path, episodes: int, seeds: int, decision_interval: int = 10) -> None:
+def run_comparison(
+    output_dir: Path,
+    episodes: int,
+    seeds: int,
+    decision_interval: int = 10,
+    horizon_steps: Optional[int] = None,
+) -> None:
     config = FisheryConfig()
+    if horizon_steps is not None:
+        config = replace(config, horizon_steps=horizon_steps)
     policies = get_v1_policy_arms()
     policy_lookup = {policy.arm_id: policy for policy in policies}
     output_dir = ensure_directory(output_dir)
@@ -152,8 +161,8 @@ def run_comparison(output_dir: Path, episodes: int, seeds: int, decision_interva
                     }
                 )
 
-    write_csv(output_dir / "bandit_episode_summaries.csv", episode_rows)
-    write_csv(output_dir / "bandit_window_summaries.csv", window_rows)
+    write_csv(output_dir / "bandit_episode_summaries_test.csv", episode_rows)
+    write_csv(output_dir / "bandit_window_summaries_test.csv", window_rows)
 
     reward_series = []
     for algorithm_name, episode_map in reward_history.items():
@@ -212,6 +221,12 @@ def main() -> None:
         help="Number of simulator steps between bandit decisions",
     )
     parser.add_argument(
+        "--horizon-steps",
+        type=int,
+        default=None,
+        help="Optional override for the episode horizon in simulator steps",
+    )
+    parser.add_argument(
         "--output-dir",
         default="outputs/bandits",
         help="Directory for CSV and SVG outputs",
@@ -222,6 +237,7 @@ def main() -> None:
         episodes=args.episodes,
         seeds=args.seeds,
         decision_interval=args.decision_interval,
+        horizon_steps=args.horizon_steps,
     )
 
 

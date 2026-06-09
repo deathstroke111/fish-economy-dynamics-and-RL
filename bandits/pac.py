@@ -26,6 +26,10 @@ class PACSuccessiveEliminationBandit(BaseBandit):
         self._queue = deque(self.active_arm_ids)
 
     def select_action(self) -> int:
+        untried = [arm_id for arm_id, count in self.counts.items() if count == 0]
+        if untried:
+            return self.random.choice(untried)
+
         if not self._queue:
             self._queue.extend(self.active_arm_ids)
         return self._queue[0]

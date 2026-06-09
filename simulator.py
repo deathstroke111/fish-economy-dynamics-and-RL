@@ -31,6 +31,12 @@ def main() -> None:
         help="Number of simulator steps between bandit decisions",
     )
     compare_parser.add_argument(
+        "--horizon-steps",
+        type=int,
+        default=None,
+        help="Optional override for the episode horizon in simulator steps",
+    )
+    compare_parser.add_argument(
         "--output-dir",
         default="outputs/bandits",
         help="Directory for bandit CSV and SVG outputs",
@@ -46,6 +52,7 @@ def main() -> None:
             episodes=args.episodes,
             seeds=args.seeds,
             decision_interval=args.decision_interval,
+            horizon_steps=args.horizon_steps,
         )
         return
 
