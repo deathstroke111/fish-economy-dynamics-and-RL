@@ -11,6 +11,7 @@ The current version implements:
 - a deterministic fishery simulator based on a system dynamics model
 - a fixed set of policy arms inspired by the original AnyLogic-style setup
 - rolling control-window bandit experiments
+- contextual bandit experiments with state-aware policies
 - CSV logging and SVG plotting
 - tests for lookup tables, dynamics, and bandit behavior
 
@@ -68,6 +69,11 @@ The policy-maker in this project is not controlling fish directly. Instead, it c
 
 The learning layer treats each policy bundle as an action. A bandit algorithm chooses one policy arm for a 10-step control window, observes the cumulative reward from that window, and then can keep or change policy for the next window.
 
+The project now supports both:
+
+- stateless bandits that learn one average value per arm
+- contextual bandits that use the current simulator state before choosing an arm
+
 ## Why This Project Exists
 
 There are two overlapping goals:
@@ -92,6 +98,7 @@ The current implementation uses:
 - piecewise-linear lookup tables for mortality and catch efficiency
 - 7 fixed policy arms
 - a balanced reward combining profit and sustainability
+- both stateless and contextual comparison workflows
 
 From the current baseline outputs in [`outputs/baseline_cli`](./outputs/baseline_cli), the qualitative story is already visible:
 
@@ -135,7 +142,11 @@ So the bandit layer is best understood as a simplified experimentation lens, not
 
 The project now exposes both views at once: short 10-step control windows for learning updates, and long 120-step episodes for ecological consequences. That makes it easier to see how a policy can look attractive locally while still degrading the long-run system.
 
-### 4. Some policy ideas need calibration, not just code
+### 4. Context matters because the same arm is not equally good in every state
+
+The current state of the fishery changes what a “good” decision looks like. A tax or reserve policy that is useful when fish stock is low may not be the best choice when the system is still healthy. That is why the repo now includes contextual bandits in addition to the original stateless suite.
+
+### 5. Some policy ideas need calibration, not just code
 
 The capacity-cap policies are implemented correctly in V1, but do not yet produce interesting behavior because the simulated fleet stays too small. This is a reminder that a policy mechanism can exist in code without becoming behaviorally relevant in the model.
 
@@ -208,20 +219,77 @@ And strongly penalized for collapse:
 
 Bandit updates use the cumulative reward over each 10-step decision window. Full episodes still run for 120 steps.
 
+## Contextual Bandits
+
+The contextual suite uses the same 10-step control-window workflow, but it lets the learner observe the current simulator state before selecting an arm.
+
+### Context used by the learner
+
+The context is built in [`fishery/env.py`](./fishery/env.py) and contains exactly these four features:
+
+1. bias term `1.0`
+2. normalized fish stock: `fish_population / carrying_capacity`
+3. normalized ships: `min(ships / 10.0, 1.0)`
+4. normalized time progress: `state.time / horizon_steps`
+
+This gives the learner a compact summary of:
+
+- ecological health
+- fishing effort
+- where the system is within the episode
+
+### Why contextual bandits help here
+
+A stateless bandit learns:
+
+- “which arm is best on average”
+
+A contextual bandit tries to learn:
+
+- “which arm is best in this kind of state”
+
+That is a much better fit for a fishery system where the reward distribution changes with fish stock, fleet size, and episode progress.
+
+### The three contextual algorithms
+
+#### `linucb`
+
+Implemented in [`bandits/linucb.py`](./bandits/linucb.py).
+
+This learns a linear reward model per arm and adds an uncertainty bonus when selecting actions. It is a good fit when policy quality changes smoothly with the state.
+
+#### `contextual_thompson`
+
+Implemented in [`bandits/contextual_thompson.py`](./bandits/contextual_thompson.py).
+
+This also learns a linear reward model per arm, but explores by sampling a plausible parameter vector from an approximate posterior. The current implementation uses a diagonal covariance approximation for simplicity and standard-library compatibility.
+
+#### `discretized_contextual`
+
+Implemented in [`bandits/discretized_contextual.py`](./bandits/discretized_contextual.py).
+
+This buckets the state space into coarse fish/ships/time regions and learns a separate local bandit in each bucket. It is easier to interpret, but less data-efficient than the linear contextual methods because nearby states do not share information.
+
 ## Repository Structure
 
 ```text
 FishEconomy/
 ├── bandits/
 │   ├── base.py
+│   ├── contextual_base.py
+│   ├── contextual_thompson.py
+│   ├── discretized_contextual.py
 │   ├── epsilon_greedy.py
+│   ├── linalg.py
+│   ├── linucb.py
 │   ├── softmax.py
 │   ├── ucb.py
 │   └── pac.py
 ├── experiments/
 │   ├── baseline.py
 │   ├── common.py
-│   └── compare_bandits.py
+│   ├── compare_bandits.py
+│   └── compare_contextual_bandits.py
 ├── fishery/
 │   ├── config.py
 │   ├── dynamics.py
@@ -283,12 +351,27 @@ Each bandit selects a policy arm ID and updates its estimate from episode reward
 - [`bandits/pac.py`](./bandits/pac.py)
   uses a successive-elimination pure-exploration strategy.
 
+The contextual suite adds:
+
+- [`bandits/contextual_base.py`](./bandits/contextual_base.py)
+  shared interface for contextual learners
+- [`bandits/linucb.py`](./bandits/linucb.py)
+  linear upper-confidence-bound contextual bandit
+- [`bandits/contextual_thompson.py`](./bandits/contextual_thompson.py)
+  approximate contextual Thompson sampler
+- [`bandits/discretized_contextual.py`](./bandits/discretized_contextual.py)
+  bucketed state-aware bandit
+- [`bandits/linalg.py`](./bandits/linalg.py)
+  tiny standard-library linear algebra helpers used by the linear contextual algorithms
+
 ### `experiments/`: runnable workflows
 
 - [`experiments/baseline.py`](./experiments/baseline.py)
   runs each policy arm once and writes trajectories, summaries, and comparison plots.
 - [`experiments/compare_bandits.py`](./experiments/compare_bandits.py)
   runs multiple seeds and episodes for each bandit algorithm and writes summary outputs.
+- [`experiments/compare_contextual_bandits.py`](./experiments/compare_contextual_bandits.py)
+  runs the contextual suite with state-based arm selection and separate outputs.
 - [`experiments/common.py`](./experiments/common.py)
   contains shared CSV and directory helpers.
 
@@ -342,6 +425,21 @@ For a bandit run:
 6. Repeat until the full 120-step episode is complete.
 7. Aggregate results over many episodes and seeds.
 
+For a contextual bandit run:
+
+1. Build a contextual learner for each algorithm.
+2. Reset the simulator for each episode.
+3. Compute the compact state context before each 10-step window.
+4. Select an arm using that context.
+5. Roll out the next 10 simulator steps.
+6. Update the learner with the same context and the cumulative reward from that window.
+7. Repeat until the full episode is complete.
+
+Contextual warm-up rule:
+
+- during episode `0`, the first pass across all `7` arms is forced to the same seeded order for all contextual algorithms
+- after that warm-up pass, the contextual algorithms choose freely
+
 ## How to Run the Project
 
 ### Requirements
@@ -392,6 +490,27 @@ This writes:
 - one average-reward-by-arm chart per algorithm
 - one collapse-rate-by-arm chart per algorithm
 
+### Run the contextual bandit comparison
+
+```bash
+python3 simulator.py compare-contextual-bandits --episodes 200 --seeds 20 --decision-interval 10 --horizon-steps 120 --output-dir outputs/contextual_bandits
+```
+
+For a quick smoke run:
+
+```bash
+python3 simulator.py compare-contextual-bandits --episodes 2 --seeds 1 --decision-interval 10 --horizon-steps 120 --output-dir outputs/contextual_bandits_smoke
+```
+
+This writes:
+
+- `contextual_episode_summaries.csv`
+- `contextual_window_summaries.csv`
+- `reward_by_episode.svg`
+- one action-frequency chart per algorithm
+- one average-reward-by-arm chart per algorithm
+- one collapse-rate-by-arm chart per algorithm
+
 ## Understanding the Output Files
 
 ### Baseline outputs
@@ -423,6 +542,22 @@ It lets you inspect:
 - how reward evolved by episode
 - which arms each algorithm preferred over time
 
+### Contextual bandit outputs
+
+The main files are:
+
+- [`outputs/contextual_bandits_smoke/contextual_episode_summaries.csv`](./outputs/contextual_bandits_smoke/contextual_episode_summaries.csv)
+- [`outputs/contextual_bandits_smoke/contextual_window_summaries.csv`](./outputs/contextual_bandits_smoke/contextual_window_summaries.csv)
+
+The window-level contextual file additionally records the state seen before each decision:
+
+- `context_bias`
+- `context_fish_norm`
+- `context_ships_norm`
+- `context_time_norm`
+
+That makes it possible to analyze not just which arm was selected, but which arm was selected in which state.
+
 ## Current Results Snapshot
 
 Using the checked-in outputs from the current repo state:
@@ -452,12 +587,15 @@ This version makes a few deliberate choices:
 - no adaptive within-episode control
 - no RL environment yet
 - no direct AnyLogic parity guarantee
+- contextual bandits use a compact hand-designed state rather than the full simulator state
 
 There are also two especially important modeling notes:
 
 ### 1. This is windowed control, not fully state-aware RL
 
 Bandits now choose a policy every 10 steps, which is more adaptive than one-arm-per-episode. But they still do not condition on the full simulator state the way an RL policy would.
+
+Contextual bandits move one step closer by conditioning on a compact state vector, but they still optimize immediate 10-step window reward rather than a full long-horizon value function.
 
 ### 2. Capacity caps are currently structurally present but behaviorally inactive
 
@@ -478,6 +616,7 @@ Some natural next steps are:
 ### Learning extensions
 
 - move from fixed-size control windows to a full state-based RL controller
+- expand the contextual state beyond fish, ships, and time
 - build a Gymnasium-style RL wrapper
 - allow state-dependent policies
 - compare myopic rewards versus discounted long-horizon returns
