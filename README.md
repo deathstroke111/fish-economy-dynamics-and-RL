@@ -36,6 +36,8 @@ If you want the implementation view, read:
 - [How to Run the Project](#how-to-run-the-project)
 - [How to Extend It](#how-to-extend-it)
 
+For a detailed, code-linked explanation of the contextual-bandit journey, see the [Contextual Bandits deep dive](./docs/contextual_bandits.md).
+
 ## Project in One Page
 
 This project models a fishery as a coupled bioeconomic system.
@@ -225,18 +227,17 @@ The contextual suite uses the same 10-step control-window workflow, but it lets 
 
 ### Context used by the learner
 
-The context is built in [`fishery/env.py`](./fishery/env.py) and contains exactly these four features:
+The context is built in [`fishery/env.py`](./fishery/env.py) and contains exactly these two features:
 
-1. bias term `1.0`
-2. normalized fish stock: `fish_population / carrying_capacity`
-3. normalized ships: `min(ships / 10.0, 1.0)`
-4. normalized time progress: `state.time / horizon_steps`
+1. normalized fish stock: `fish_population / carrying_capacity`
+2. normalized ships: `min(ships / 10.0, 1.0)`
+
+The contextual learners now pass that 2-D state through a small learned neural embedding before scoring each arm. That gives the model a richer nonlinear representation without forcing it to treat time as part of the state signal.
 
 This gives the learner a compact summary of:
 
 - ecological health
 - fishing effort
-- where the system is within the episode
 
 ### Why contextual bandits help here
 
@@ -248,7 +249,7 @@ A contextual bandit tries to learn:
 
 - “which arm is best in this kind of state”
 
-That is a much better fit for a fishery system where the reward distribution changes with fish stock, fleet size, and episode progress.
+That is a much better fit for a fishery system where the reward distribution changes with fish stock and fleet size.
 
 ### The three contextual algorithms
 
@@ -268,7 +269,7 @@ This also learns a linear reward model per arm, but explores by sampling a plaus
 
 Implemented in [`bandits/discretized_contextual.py`](./bandits/discretized_contextual.py).
 
-This buckets the state space into coarse fish/ships/time regions and learns a separate local bandit in each bucket. It is easier to interpret, but less data-efficient than the linear contextual methods because nearby states do not share information.
+This buckets the state space into coarse fish/ships regions and learns a separate local bandit in each bucket. It is easier to interpret, but less data-efficient than the linear contextual methods because nearby states do not share information.
 
 ## Repository Structure
 
@@ -282,6 +283,7 @@ FishEconomy/
 │   ├── epsilon_greedy.py
 │   ├── linalg.py
 │   ├── linucb.py
+│   ├── neural_encoder.py
 │   ├── softmax.py
 │   ├── ucb.py
 │   └── pac.py
@@ -361,6 +363,8 @@ The contextual suite adds:
   approximate contextual Thompson sampler
 - [`bandits/discretized_contextual.py`](./bandits/discretized_contextual.py)
   bucketed state-aware bandit
+- [`bandits/neural_encoder.py`](./bandits/neural_encoder.py)
+  small online neural encoder that maps the two-feature state into a learned embedding
 - [`bandits/linalg.py`](./bandits/linalg.py)
   tiny standard-library linear algebra helpers used by the linear contextual algorithms
 
@@ -430,10 +434,11 @@ For a contextual bandit run:
 1. Build a contextual learner for each algorithm.
 2. Reset the simulator for each episode.
 3. Compute the compact state context before each 10-step window.
-4. Select an arm using that context.
-5. Roll out the next 10 simulator steps.
-6. Update the learner with the same context and the cumulative reward from that window.
-7. Repeat until the full episode is complete.
+4. Encode the state with the neural encoder for the linear contextual algorithms.
+5. Select an arm using the context or its embedding.
+6. Roll out the next 10 simulator steps.
+7. Update the arm model and, for the linear contextual algorithms, the encoder with the cumulative reward from that window.
+8. Repeat until the full episode is complete.
 
 Contextual warm-up rule:
 
@@ -551,10 +556,8 @@ The main files are:
 
 The window-level contextual file additionally records the state seen before each decision:
 
-- `context_bias`
 - `context_fish_norm`
 - `context_ships_norm`
-- `context_time_norm`
 
 That makes it possible to analyze not just which arm was selected, but which arm was selected in which state.
 
@@ -616,7 +619,8 @@ Some natural next steps are:
 ### Learning extensions
 
 - move from fixed-size control windows to a full state-based RL controller
-- expand the contextual state beyond fish, ships, and time
+- expand the contextual state beyond fish and ships
+- compare the learned neural embedding with engineered interaction features
 - build a Gymnasium-style RL wrapper
 - allow state-dependent policies
 - compare myopic rewards versus discounted long-horizon returns

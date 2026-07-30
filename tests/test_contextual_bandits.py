@@ -24,20 +24,18 @@ class ContextualBanditTests(unittest.TestCase):
     def test_context_extraction_uses_expected_feature_order(self) -> None:
         state = FisheryState(time=30, fish_population=600.0, ships=3.0)
         context = contextual_state_features(state, self.config)
-        self.assertEqual(len(context), 4)
-        self.assertEqual(context[0], 1.0)
-        self.assertAlmostEqual(context[1], 0.5)
-        self.assertAlmostEqual(context[2], 0.3)
-        self.assertAlmostEqual(context[3], 30.0 / self.config.horizon_steps)
+        self.assertEqual(len(context), 2)
+        self.assertAlmostEqual(context[0], 0.5)
+        self.assertAlmostEqual(context[1], 0.3)
 
     def test_context_ships_feature_is_capped(self) -> None:
         state = FisheryState(time=0, fish_population=1000.0, ships=50.0)
         context = contextual_state_features(state, self.config)
-        self.assertEqual(context[2], 1.0)
+        self.assertEqual(context[1], 1.0)
 
     def test_linucb_updates_selected_arm_only(self) -> None:
         bandit = LinUCBBandit(self.arms, seed=1)
-        context = [1.0, 0.5, 0.2, 0.1]
+        context = [0.5, 0.2]
         before_selected = [row[:] for row in bandit.A_matrices[1]]
         before_other = [row[:] for row in bandit.A_matrices[3]]
         bandit.update(context, 1, 5.0)
@@ -46,7 +44,7 @@ class ContextualBanditTests(unittest.TestCase):
 
     def test_contextual_thompson_updates_selected_arm_only(self) -> None:
         bandit = ContextualThompsonBandit(self.arms, seed=1)
-        context = [1.0, 0.5, 0.2, 0.1]
+        context = [0.5, 0.2]
         before_selected = list(bandit.b_vectors[1])
         before_other = list(bandit.b_vectors[3])
         bandit.update(context, 1, 5.0)
@@ -55,7 +53,7 @@ class ContextualBanditTests(unittest.TestCase):
 
     def test_discretized_contextual_updates_selected_bucket_only(self) -> None:
         bandit = DiscretizedContextualBandit(self.arms, seed=1)
-        context = [1.0, 0.8, 0.3, 0.2]
+        context = [0.8, 0.3]
         bucket = bandit.bucket_for_context(context)
         bandit.update(context, 1, 3.0)
         self.assertEqual(bandit.bucket_counts[bucket][1], 1)
@@ -63,7 +61,7 @@ class ContextualBanditTests(unittest.TestCase):
 
     def test_unseen_bucket_explores_untried_arms_first(self) -> None:
         bandit = DiscretizedContextualBandit(self.arms, seed=2)
-        context = [1.0, 0.6, 0.1, 0.1]
+        context = [0.6, 0.1]
         seen = {bandit.select_action(context) for _ in range(len(self.arms))}
         self.assertTrue(seen.issubset({arm.arm_id for arm in self.arms}))
 
@@ -84,10 +82,8 @@ class ContextualBanditTests(unittest.TestCase):
             self.assertEqual(len(window_lines) - 1, 3 * 1 * 2 * 12)
 
             header = window_lines[0].split(",")
-            self.assertIn("context_bias", header)
             self.assertIn("context_fish_norm", header)
             self.assertIn("context_ships_norm", header)
-            self.assertIn("context_time_norm", header)
 
             rows = [line.split(",") for line in window_lines[1:]]
             column_index = {name: header.index(name) for name in header}

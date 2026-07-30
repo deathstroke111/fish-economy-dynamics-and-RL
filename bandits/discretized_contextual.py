@@ -5,7 +5,7 @@ from typing import Dict, List, Tuple
 from .contextual_base import BaseContextualBandit
 
 
-BucketKey = Tuple[int, int, int]
+BucketKey = Tuple[int, int]
 
 
 class DiscretizedContextualBandit(BaseContextualBandit):
@@ -16,13 +16,11 @@ class DiscretizedContextualBandit(BaseContextualBandit):
         self.bucket_values: Dict[BucketKey, Dict[int, float]] = {}
 
     def bucket_for_context(self, context: List[float]) -> BucketKey:
-        fish_norm = context[1]
-        ships_norm = context[2]
-        time_norm = context[3]
+        fish_norm = context[0]
+        ships_norm = context[1]
         return (
             self._bucket_index(fish_norm, (0.25, 0.5, 0.75)),
             self._bucket_index(ships_norm, (0.2, 0.5)),
-            self._bucket_index(time_norm, (1.0 / 3.0, 2.0 / 3.0)),
         )
 
     def select_action(self, context: List[float]) -> int:
