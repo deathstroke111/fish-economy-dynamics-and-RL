@@ -16,6 +16,15 @@ def initial_state(config: FisheryConfig) -> FisheryState:
     )
 
 
+def contextual_state_features(state: FisheryState, config: FisheryConfig) -> List[float]:
+    """Return the compact normalized context used by contextual bandits."""
+
+    return [
+        state.fish_population / config.carrying_capacity,
+        min(state.ships / 10.0, 1.0),
+    ]
+
+
 def rollout(
     initial: FisheryState,
     policy: PolicyArm,
